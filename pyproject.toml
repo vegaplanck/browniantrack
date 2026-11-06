@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "browniantrack"
+version = "0.1.0"
+description = "Aplicativo desktop para rastreamento de partículas em vídeos"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "matplotlib>=3.7",
+    "numpy>=1.23",
+    "pandas>=1.5",
+    "pims>=0.6",
+    "trackpy>=0.6",
+    "av>=12",
+]
+
+[project.optional-dependencies]
+build = ["pyinstaller>=6.15"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,42 @@
+name: Build standalone applications
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            artifact: BrownianTrack-linux-x86_64
+            file: dist/BrownianTrack-linux-x86_64.tar.gz
+          - os: windows-latest
+            artifact: BrownianTrack-windows-x86_64
+            file: dist/BrownianTrack-windows-x86_64.zip
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install application and build dependencies
+        run: python -m pip install ".[build]"
+      - name: Build standalone bundle
+        run: python build_standalone.py
+      - name: Upload standalone package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.file }}
+          if-no-files-found: error
+          retention-days: 30
