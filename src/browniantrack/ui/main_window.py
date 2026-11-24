@@ -2,7 +2,7 @@ import queue
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, font as tkfont, messagebox, ttk
 
 import pandas as pd
 import trackpy as tp
@@ -18,14 +18,37 @@ from browniantrack.core.tracking import (
     resolve_frame_range,
 )
 from browniantrack.core.video_preview import PreviewResult, VideoPreviewWorker
+from browniantrack.ui.scaling import configure_tk_scaling
 
 
 class MainWindow:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
+        self.ui_scale = configure_tk_scaling(root)
+        self.ui_font_family = str(
+            tkfont.nametofont("TkDefaultFont", root=root).actual()["family"]
+        )
+        if self.ui_scale != 1:
+            style = ttk.Style(root)
+            style.configure(
+                "TButton",
+                padding=(self._scale_px(6), self._scale_px(3)),
+            )
+            style.configure(
+                "TCheckbutton",
+                padding=(self._scale_px(3), self._scale_px(2)),
+            )
+            style.configure(
+                "TEntry",
+                padding=(self._scale_px(3), self._scale_px(2)),
+            )
+            style.configure(
+                "TCombobox",
+                padding=(self._scale_px(3), self._scale_px(2)),
+            )
         self.root.title("BrownianTrack")
-        self.root.geometry("1120x760")
-        self.root.minsize(820, 560)
+        self.root.geometry(f"{self._scale_px(1120)}x{self._scale_px(760)}")
+        self.root.minsize(self._scale_px(820), self._scale_px(560))
         self.video_path: Path | None = None
         self.video_frame_count = 0
         self.video_frame_rate = 30.0
@@ -68,16 +91,26 @@ class MainWindow:
         self.root.after(100, self._poll_analysis_result)
         self.root.after(100, self._poll_report_result)
 
+    def _scale_px(self, value: int) -> int:
+        return round(value * self.ui_scale)
+
+    def _scale_pair(self, values: tuple[int, int]) -> tuple[int, int]:
+        return self._scale_px(values[0]), self._scale_px(values[1])
+
     def _build_ui(self) -> None:
-        body = ttk.Frame(self.root, padding=12)
+        body = ttk.Frame(self.root, padding=self._scale_px(12))
         body.pack(fill=tk.BOTH, expand=True)
         body.columnconfigure(1, weight=1)
         body.rowconfigure(0, weight=1)
 
-        controls_container = ttk.Frame(body, width=300)
-        controls_container.grid(row=0, column=0, sticky=tk.NS, padx=(0, 12))
+        controls_container = ttk.Frame(body, width=self._scale_px(300))
+        controls_container.grid(
+            row=0, column=0, sticky=tk.NS, padx=self._scale_pair((0, 12))
+        )
         controls_container.grid_propagate(False)
-        controls_canvas = tk.Canvas(controls_container, highlightthickness=0, width=280)
+        controls_canvas = tk.Canvas(
+            controls_container, highlightthickness=0, width=self._scale_px(280)
+        )
         controls_scrollbar = ttk.Scrollbar(
             controls_container,
             orient=tk.VERTICAL,
@@ -86,7 +119,7 @@ class MainWindow:
         controls_canvas.configure(yscrollcommand=controls_scrollbar.set)
         controls_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         controls_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        controls = ttk.Frame(controls_canvas, width=280)
+        controls = ttk.Frame(controls_canvas, width=self._scale_px(280))
         controls_window = controls_canvas.create_window(
             (0, 0), window=controls, anchor=tk.NW
         )
@@ -117,8 +150,12 @@ class MainWindow:
             lambda _event: controls_canvas.yview_scroll(1, "units"),
         )
 
-        ttk.Label(controls, text="BrownianTrack", font=("", 18, "bold")).pack(
-            anchor=tk.W, pady=(0, 12)
+        ttk.Label(
+            controls,
+            text="BrownianTrack",
+            font=(self.ui_font_family, 18, "bold"),
+        ).pack(
+            anchor=tk.W, pady=self._scale_pair((0, 12))
         )
         ttk.Button(controls, text="Abrir vídeo…", command=self._open_video).pack(
             fill=tk.X
@@ -126,17 +163,23 @@ class MainWindow:
         ttk.Label(
             controls,
             textvariable=self.video_label,
-            wraplength=230,
+            wraplength=self._scale_px(230),
             justify=tk.LEFT,
-        ).pack(anchor=tk.W, pady=(6, 12))
+        ).pack(anchor=tk.W, pady=self._scale_pair((6, 12)))
 
-        parameters = ttk.LabelFrame(controls, text="Detecção trackpy", padding=10)
-        parameters.pack(fill=tk.X, pady=(0, 10))
+        parameters = ttk.LabelFrame(
+            controls, text="Detecção trackpy", padding=self._scale_px(10)
+        )
+        parameters.pack(fill=tk.X, pady=self._scale_pair((0, 10)))
         ttk.Label(parameters, text="Diâmetro (px, ímpar)").grid(
-            row=0, column=0, sticky=tk.W, pady=4
+            row=0, column=0, sticky=tk.W, pady=self._scale_px(4)
         )
         ttk.Entry(parameters, textvariable=self.diameter, width=8).grid(
-            row=0, column=1, sticky=tk.E, padx=(8, 4), pady=4
+            row=0,
+            column=1,
+            sticky=tk.E,
+            padx=self._scale_pair((8, 4)),
+            pady=self._scale_px(4),
         )
         self.apply_diameter_button = ttk.Button(
             parameters,
@@ -144,12 +187,18 @@ class MainWindow:
             width=7,
             command=self._apply_diameter,
         )
-        self.apply_diameter_button.grid(row=0, column=2, sticky=tk.E, pady=4)
+        self.apply_diameter_button.grid(
+            row=0, column=2, sticky=tk.E, pady=self._scale_px(4)
+        )
         ttk.Label(parameters, text="Massa mínima").grid(
-            row=1, column=0, sticky=tk.W, pady=4
+            row=1, column=0, sticky=tk.W, pady=self._scale_px(4)
         )
         ttk.Entry(parameters, textvariable=self.minmass, width=8).grid(
-            row=1, column=1, sticky=tk.E, padx=(8, 4), pady=4
+            row=1,
+            column=1,
+            sticky=tk.E,
+            padx=self._scale_pair((8, 4)),
+            pady=self._scale_px(4),
         )
         self.apply_minmass_button = ttk.Button(
             parameters,
@@ -157,59 +206,73 @@ class MainWindow:
             width=7,
             command=self._apply_minmass,
         )
-        self.apply_minmass_button.grid(row=1, column=2, sticky=tk.E, pady=4)
+        self.apply_minmass_button.grid(
+            row=1, column=2, sticky=tk.E, pady=self._scale_px(4)
+        )
 
-        physical = ttk.LabelFrame(controls, text="Parâmetros físicos", padding=10)
-        physical.pack(fill=tk.X, pady=(0, 10))
+        physical = ttk.LabelFrame(
+            controls, text="Parâmetros físicos", padding=self._scale_px(10)
+        )
+        physical.pack(fill=tk.X, pady=self._scale_pair((0, 10)))
         ttk.Label(physical, text="Raio hidrodinâmico (nm)").grid(
-            row=0, column=0, sticky=tk.W, pady=3
+            row=0, column=0, sticky=tk.W, pady=self._scale_px(3)
         )
         ttk.Entry(physical, textvariable=self.radius_nm, width=11).grid(
-            row=0, column=1, sticky=tk.E, pady=3
+            row=0, column=1, sticky=tk.E, pady=self._scale_px(3)
         )
         ttk.Label(physical, text="Temperatura (°C)").grid(
-            row=1, column=0, sticky=tk.W, pady=3
+            row=1, column=0, sticky=tk.W, pady=self._scale_px(3)
         )
         ttk.Entry(physical, textvariable=self.temperature_c, width=11).grid(
-            row=1, column=1, sticky=tk.E, pady=3
+            row=1, column=1, sticky=tk.E, pady=self._scale_px(3)
         )
         ttk.Label(physical, text="Escala espacial (µm/px)").grid(
-            row=2, column=0, sticky=tk.W, pady=3
+            row=2, column=0, sticky=tk.W, pady=self._scale_px(3)
         )
         ttk.Entry(
             physical,
             textvariable=self.micrometers_per_pixel,
             width=11,
-        ).grid(row=2, column=1, sticky=tk.E, pady=3)
+        ).grid(row=2, column=1, sticky=tk.E, pady=self._scale_px(3))
         ttk.Label(
             physical,
             text="Sem calibração, MSD e D ficam em unidades de pixel e η física não é calculada.",
-            wraplength=220,
+            wraplength=self._scale_px(220),
             justify=tk.LEFT,
-        ).grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
+        ).grid(
+            row=3,
+            column=0,
+            columnspan=2,
+            sticky=tk.W,
+            pady=self._scale_pair((5, 0)),
+        )
 
         ttk.Checkbutton(
             controls,
             text="Círculos vermelhos (tp.annotate)",
             variable=self.show_circles,
             command=self._on_display_settings_changed,
-        ).pack(anchor=tk.W, pady=4)
+        ).pack(anchor=tk.W, pady=self._scale_px(4))
         ttk.Checkbutton(
             controls,
             text="Exibir em escala de cinza",
             variable=self.show_grayscale,
             command=self._on_display_settings_changed,
-        ).pack(anchor=tk.W, pady=4)
+        ).pack(anchor=tk.W, pady=self._scale_px(4))
         ttk.Label(
             controls,
             text="A detecção do trackpy é feita em tons de cinza nos dois modos.",
-            wraplength=230,
+            wraplength=self._scale_px(230),
             justify=tk.LEFT,
-        ).pack(anchor=tk.W, pady=(2, 10))
+        ).pack(anchor=tk.W, pady=self._scale_pair((2, 10)))
 
-        interval = ttk.LabelFrame(controls, text="Intervalo de análise", padding=10)
-        interval.pack(fill=tk.X, pady=(0, 10))
-        ttk.Label(interval, text="Unidade").grid(row=0, column=0, sticky=tk.W, pady=3)
+        interval = ttk.LabelFrame(
+            controls, text="Intervalo de análise", padding=self._scale_px(10)
+        )
+        interval.pack(fill=tk.X, pady=self._scale_pair((0, 10)))
+        ttk.Label(interval, text="Unidade").grid(
+            row=0, column=0, sticky=tk.W, pady=self._scale_px(3)
+        )
         self.interval_unit_box = ttk.Combobox(
             interval,
             textvariable=self.interval_unit,
@@ -217,29 +280,41 @@ class MainWindow:
             state="readonly",
             width=10,
         )
-        self.interval_unit_box.grid(row=0, column=1, sticky=tk.E, pady=3)
+        self.interval_unit_box.grid(
+            row=0, column=1, sticky=tk.E, pady=self._scale_px(3)
+        )
         self.interval_unit_box.bind(
             "<<ComboboxSelected>>", self._on_interval_unit_changed
         )
         self.interval_start_label = ttk.Label(interval, text="Início (quadro)")
-        self.interval_start_label.grid(row=1, column=0, sticky=tk.W, pady=3)
+        self.interval_start_label.grid(
+            row=1, column=0, sticky=tk.W, pady=self._scale_px(3)
+        )
         ttk.Entry(interval, textvariable=self.interval_start, width=11).grid(
-            row=1, column=1, sticky=tk.E, pady=3
+            row=1, column=1, sticky=tk.E, pady=self._scale_px(3)
         )
         self.interval_end_label = ttk.Label(interval, text="Fim (quadro)")
-        self.interval_end_label.grid(row=2, column=0, sticky=tk.W, pady=3)
+        self.interval_end_label.grid(
+            row=2, column=0, sticky=tk.W, pady=self._scale_px(3)
+        )
         ttk.Entry(interval, textvariable=self.interval_end, width=11).grid(
-            row=2, column=1, sticky=tk.E, pady=3
+            row=2, column=1, sticky=tk.E, pady=self._scale_px(3)
         )
         ttk.Label(
             interval,
             text="Limites inclusivos. Em segundos, o tempo é convertido para o quadro correspondente.",
-            wraplength=220,
+            wraplength=self._scale_px(220),
             justify=tk.LEFT,
-        ).grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
+        ).grid(
+            row=3,
+            column=0,
+            columnspan=2,
+            sticky=tk.W,
+            pady=self._scale_pair((5, 0)),
+        )
 
         ttk.Label(controls, textvariable=self.detection_label).pack(
-            anchor=tk.W, pady=(4, 10)
+            anchor=tk.W, pady=self._scale_pair((4, 10))
         )
         self.analyze_interval_button = ttk.Button(
             controls,
@@ -247,14 +322,16 @@ class MainWindow:
             command=self._start_interval_analysis,
             state=tk.DISABLED,
         )
-        self.analyze_interval_button.pack(fill=tk.X, pady=(4, 4))
+        self.analyze_interval_button.pack(
+            fill=tk.X, pady=self._scale_pair((4, 4))
+        )
         self.analyze_all_button = ttk.Button(
             controls,
             text="Analisar vídeo todo",
             command=self._start_full_analysis,
             state=tk.DISABLED,
         )
-        self.analyze_all_button.pack(fill=tk.X, pady=(0, 4))
+        self.analyze_all_button.pack(fill=tk.X, pady=self._scale_pair((0, 4)))
         self.export_button = ttk.Button(
             controls,
             text="Exportar CSV",
@@ -268,21 +345,21 @@ class MainWindow:
             command=self._export_trajectory_plot,
             state=tk.DISABLED,
         )
-        self.export_plot_button.pack(fill=tk.X, pady=(4, 0))
+        self.export_plot_button.pack(fill=tk.X, pady=self._scale_pair((4, 0)))
         self.export_physical_button = ttk.Button(
             controls,
             text="Calcular grandezas e exportar CSV",
             command=self._export_physical_report,
             state=tk.DISABLED,
         )
-        self.export_physical_button.pack(fill=tk.X, pady=(4, 0))
+        self.export_physical_button.pack(fill=tk.X, pady=self._scale_pair((4, 0)))
 
         video_panel = ttk.Frame(body)
         video_panel.grid(row=0, column=1, sticky=tk.NSEW)
         video_panel.columnconfigure(0, weight=1)
         video_panel.rowconfigure(0, weight=1)
 
-        self.figure = Figure(figsize=(8, 6), dpi=100)
+        self.figure = Figure(figsize=(8, 6), dpi=self._scale_px(100))
         self.axes = self.figure.add_subplot(111)
         self.axes.set_axis_off()
         self.axes.text(
@@ -298,7 +375,9 @@ class MainWindow:
         self.canvas.draw()
 
         playback = ttk.Frame(video_panel)
-        playback.grid(row=1, column=0, sticky=tk.EW, pady=(8, 0))
+        playback.grid(
+            row=1, column=0, sticky=tk.EW, pady=self._scale_pair((8, 0))
+        )
         playback.columnconfigure(1, weight=1)
         self.play_button = ttk.Button(
             playback,
@@ -306,7 +385,9 @@ class MainWindow:
             command=self._toggle_playback,
             state=tk.DISABLED,
         )
-        self.play_button.grid(row=0, column=0, padx=(0, 8))
+        self.play_button.grid(
+            row=0, column=0, padx=self._scale_pair((0, 8))
+        )
         self.position_scale = ttk.Scale(
             playback,
             from_=0,
@@ -317,12 +398,15 @@ class MainWindow:
         self.position_scale.grid(row=0, column=1, sticky=tk.EW)
         self.position_scale.bind("<ButtonRelease-1>", self._on_seek_released)
         ttk.Label(playback, textvariable=self.frame_label, width=26).grid(
-            row=0, column=2, padx=(8, 0)
+            row=0, column=2, padx=self._scale_pair((8, 0))
         )
 
         ttk.Label(
-            video_panel, textvariable=self.status, wraplength=720, anchor=tk.W
-        ).grid(row=2, column=0, sticky=tk.EW, pady=(8, 0))
+            video_panel,
+            textvariable=self.status,
+            wraplength=self._scale_px(720),
+            anchor=tk.W,
+        ).grid(row=2, column=0, sticky=tk.EW, pady=self._scale_pair((8, 0)))
 
     def _open_video(self, _event: tk.Event | None = None) -> None:
         if self.analysis_in_progress or self.report_in_progress:

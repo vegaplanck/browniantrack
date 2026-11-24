@@ -9,6 +9,9 @@ analisar movimento browniano usando [trackpy](https://github.com/soft-matter/tra
 - O ambiente `fisexpvi`, com `trackpy` e `pims`
 - Tkinter (incluído no ambiente Python; em algumas distribuições Linux pode
   precisar ser instalado separadamente)
+- No Linux, a escala da interface acompanha o DPI Xft quando o recurso
+  `Xft.dpi` puder ser lido por `xrdb`; nos demais casos, o Tk mantém sua escala
+  nativa.
 
 ## Instalação e execução
 
