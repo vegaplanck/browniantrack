@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
@@ -105,8 +106,9 @@ def analyze_video(
     settings: TrackingSettings,
     start_frame: int = 0,
     end_frame: int | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> pd.DataFrame:
-    """Detecta partículas no intervalo inclusivo e associa quadros consecutivos."""
+    """Detecta partículas e pode informar quadros processados no intervalo inclusivo."""
     frames = pims.open(str(video_path))
     try:
         frame_count = len(frames)
@@ -129,6 +131,7 @@ def analyze_video(
         ):
             frame_rate = 30.0
         processed_frames = 0
+        total_selected_frames = end_frame - start_frame + 1
 
         def add_frame_timestamp(frame_number: int, features: pd.DataFrame) -> pd.DataFrame:
             nonlocal processed_frames
@@ -138,6 +141,8 @@ def analyze_video(
             if not isinstance(timestamp, (int, float)) or not isfinite(timestamp):
                 timestamp = frame_number / frame_rate
             features["time_s"] = float(timestamp)
+            if progress_callback is not None:
+                progress_callback(processed_frames, total_selected_frames)
             return features
 
         grayscale_frames = pims.as_gray(selected_frames)
@@ -343,6 +348,17 @@ def calculate_physical_metrics(
     return pd.DataFrame(summary_rows), msd_curve
 
 
+def write_physical_report_xlsx(
+    summary: pd.DataFrame,
+    msd_curve: pd.DataFrame,
+    output_path: Path,
+) -> None:
+    """Salva o resumo e a curva MSD em abas separadas de uma planilha XLSX."""
+    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        summary.to_excel(writer, sheet_name="Resumo", index=False)
+        msd_curve.to_excel(writer, sheet_name="Curva MSD", index=False)
+
+
 def export_physical_report(
     trajectories: pd.DataFrame,
     output_path: Path,
@@ -350,37 +366,18 @@ def export_physical_report(
     temperature_c: float,
     micrometers_per_pixel: float | None = None,
 ) -> None:
-    """Calcula as grandezas e salva um CSV com resumo, entradas e curva de MSD."""
+    """Calcula as grandezas e salva um XLSX com resumo e curva de MSD."""
     summary, msd_curve = calculate_physical_metrics(
         trajectories,
         radius_nm,
         temperature_c,
         micrometers_per_pixel,
     )
-    rows = [
-        {
-            "Seção": "Resumo",
-            "Grandeza": row["Grandeza"],
-            "Valor": row["Valor"],
-            "Unidade": row["Unidade"],
-        }
-        for row in summary.to_dict(orient="records")
-    ]
-    for row in msd_curve.to_dict(orient="records"):
-        rows.append(
-            {
-                "Seção": "Curva MSD",
-                "Grandeza": "",
-                "Valor": "",
-                "Unidade": "",
-                **row,
-            }
-        )
-    pd.DataFrame(rows).to_csv(output_path, index=False, encoding="utf-8-sig")
+    write_physical_report_xlsx(summary, msd_curve, output_path)
 
 
-def export_trajectory_plot(trajectories: pd.DataFrame, output_path: Path) -> None:
-    """Gera e salva o gráfico das trajetórias detectadas usando trackpy."""
+def create_trajectory_figure(trajectories: pd.DataFrame) -> Figure:
+    """Cria uma figura Matplotlib com as trajetórias detectadas pelo trackpy."""
     if trajectories.empty:
         raise ValueError("Não há trajetórias para desenhar.")
 
@@ -395,4 +392,10 @@ def export_trajectory_plot(trajectories: pd.DataFrame, output_path: Path) -> Non
     tp.plot_traj(trajectories, ax=axes)
     axes.set_title("Trajetórias das partículas")
     figure.tight_layout()
+    return figure
+
+
+def export_trajectory_plot(trajectories: pd.DataFrame, output_path: Path) -> None:
+    """Gera e salva o gráfico das trajetórias detectadas usando trackpy."""
+    figure = create_trajectory_figure(trajectories)
     figure.savefig(output_path, dpi=150, bbox_inches="tight")

@@ -115,6 +115,7 @@ class VideoAnalysisTests(unittest.TestCase):
         grayscale_frames = Mock()
         expected = pd.DataFrame({"x": [10.0], "y": [12.0], "frame": [10]})
         linked = expected.assign(particle=0)
+        progress_updates: list[tuple[int, int]] = []
 
         def locate_batch(
             _frames: object,
@@ -123,7 +124,13 @@ class VideoAnalysisTests(unittest.TestCase):
             processes: int,
             after_locate: Callable[[int, pd.DataFrame], pd.DataFrame],
         ) -> pd.DataFrame:
-            return after_locate(10, expected.copy())
+            return pd.concat(
+                [
+                    after_locate(10 + index, expected.copy())
+                    for index in range(3)
+                ],
+                ignore_index=True,
+            )
 
         with (
             patch("browniantrack.core.tracking.pims.open", return_value=frames),
@@ -142,6 +149,9 @@ class VideoAnalysisTests(unittest.TestCase):
                 TrackingSettings(),
                 start_frame=10,
                 end_frame=12,
+                progress_callback=lambda processed, total: progress_updates.append(
+                    (processed, total)
+                ),
             )
 
         frames.__getitem__.assert_called_once_with(slice(10, 13))
@@ -155,6 +165,7 @@ class VideoAnalysisTests(unittest.TestCase):
         )
         self.assertEqual(link_df.call_args.args[0]["time_s"].iloc[0], 2.0)
         link_df.assert_called_once()
+        self.assertEqual(progress_updates, [(1, 3), (2, 3), (3, 3)])
         frames.close.assert_called_once_with()
         self.assertIs(result, linked)
 
@@ -260,18 +271,21 @@ class PhysicalMetricsTests(unittest.TestCase):
 
     def test_exports_summary_inputs_and_msd_curve(self) -> None:
         with TemporaryDirectory() as directory:
-            output_path = Path(directory) / "physical.csv"
+            output_path = Path(directory) / "physical.xlsx"
             export_physical_report(
                 self.trajectories,
                 output_path,
                 radius_nm=500,
                 temperature_c=22,
             )
-            report = pd.read_csv(output_path)
-        self.assertIn("Raio hidrodinâmico informado", report["Grandeza"].values)
-        self.assertIn("Temperatura informada", report["Grandeza"].values)
-        self.assertIn("Origem de NA", report["Grandeza"].values)
-        self.assertIn("Curva MSD", report["Seção"].values)
+            with pd.ExcelFile(output_path) as workbook:
+                self.assertEqual(workbook.sheet_names, ["Resumo", "Curva MSD"])
+                summary = pd.read_excel(workbook, sheet_name="Resumo")
+                msd_curve = pd.read_excel(workbook, sheet_name="Curva MSD")
+        self.assertIn("Raio hidrodinâmico informado", summary["Grandeza"].values)
+        self.assertIn("Temperatura informada", summary["Grandeza"].values)
+        self.assertIn("Origem de NA", summary["Grandeza"].values)
+        self.assertIn("lag_frames", msd_curve.columns)
 
     def test_rejects_invalid_physical_inputs(self) -> None:
         with self.assertRaisesRegex(ValueError, "raio"):

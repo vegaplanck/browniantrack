@@ -4,9 +4,18 @@ from pathlib import Path
 
 import pandas as pd
 import trackpy as tp
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
-from PySide6.QtCore import QSignalBlocker, QPoint, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import (
+    QAbstractTableModel,
+    QModelIndex,
+    QPoint,
+    QRectF,
+    QSignalBlocker,
+    QSize,
+    Qt,
+    QTimer,
+)
 from PySide6.QtGui import (
     QColor,
     QCloseEvent,
@@ -16,20 +25,26 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QDialog,
     QFileDialog,
     QGridLayout,
     QGroupBox,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSlider,
     QSizePolicy,
+    QTabWidget,
+    QTableView,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -38,10 +53,11 @@ from PySide6.QtWidgets import (
 from browniantrack.core.tracking import (
     TrackingSettings,
     analyze_video,
-    export_physical_report,
-    export_trajectory_plot,
+    calculate_physical_metrics,
+    create_trajectory_figure,
     inspect_video,
     resolve_frame_range,
+    write_physical_report_xlsx,
 )
 from browniantrack.core.video_preview import PreviewResult, VideoPreviewWorker
 
@@ -98,6 +114,101 @@ class ThemeSwitch(QCheckBox):
         painter.end()
 
 
+class DataFrameTableModel(QAbstractTableModel):
+    def __init__(
+        self,
+        dataframe: pd.DataFrame,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._dataframe = dataframe
+
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        return 0 if parent.isValid() else len(self._dataframe)
+
+    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        return 0 if parent.isValid() else len(self._dataframe.columns)
+
+    def data(
+        self,
+        index: QModelIndex,
+        role: int = Qt.ItemDataRole.DisplayRole,
+    ) -> str | None:
+        if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
+            return None
+        value = self._dataframe.iat[index.row(), index.column()]
+        return "" if pd.isna(value) else str(value)
+
+    def headerData(
+        self,
+        section: int,
+        orientation: Qt.Orientation,
+        role: int = Qt.ItemDataRole.DisplayRole,
+    ) -> str | None:
+        if role != Qt.ItemDataRole.DisplayRole:
+            return None
+        if orientation == Qt.Orientation.Horizontal:
+            if 0 <= section < len(self._dataframe.columns):
+                return str(self._dataframe.columns[section])
+            return None
+        if 0 <= section < len(self._dataframe):
+            return str(section + 1)
+        return None
+
+
+def _create_dataframe_table(dataframe: pd.DataFrame) -> QTableView:
+    table = QTableView()
+    table.setModel(DataFrameTableModel(dataframe, table))
+    table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+    table.setAlternatingRowColors(True)
+    table.verticalHeader().setVisible(False)
+    table.horizontalHeader().setSectionResizeMode(
+        QHeaderView.ResizeMode.ResizeToContents
+    )
+    table.horizontalHeader().setResizeContentsPrecision(100)
+    table.horizontalHeader().setStretchLastSection(True)
+    return table
+
+
+class PhysicalReportDialog(QDialog):
+    def __init__(
+        self,
+        summary: pd.DataFrame,
+        msd_curve: pd.DataFrame,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Grandezas físicas")
+        self.resize(900, 600)
+
+        layout = QVBoxLayout(self)
+        tabs = QTabWidget()
+        tabs.addTab(_create_dataframe_table(summary), "Resumo")
+        tabs.addTab(_create_dataframe_table(msd_curve), "Curva MSD")
+        layout.addWidget(tabs)
+
+        self.save_button = QPushButton("Salvar planilha…")
+        layout.addWidget(self.save_button)
+
+
+class TrackingDataDialog(QDialog):
+    def __init__(
+        self,
+        tracking_data: pd.DataFrame,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Dados de Tracking")
+        self.resize(1000, 650)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(_create_dataframe_table(tracking_data))
+
+        self.save_button = QPushButton("Salvar CSV…")
+        layout.addWidget(self.save_button)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -117,7 +228,12 @@ class MainWindow(QMainWindow):
         self.analysis_queue: queue.Queue[
             tuple[pd.DataFrame | None, Exception | None]
         ] = queue.Queue()
-        self.report_queue: queue.Queue[tuple[str | None, Exception | None]] = queue.Queue()
+        self.analysis_progress_queue: queue.Queue[tuple[int, int]] = queue.Queue(
+            maxsize=1
+        )
+        self.report_queue: queue.Queue[
+            tuple[tuple[pd.DataFrame, pd.DataFrame] | None, Exception | None]
+        ] = queue.Queue()
         self.analysis_in_progress = False
         self.report_in_progress = False
         self.applied_settings = TrackingSettings()
@@ -127,6 +243,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._apply_theme(False)
         self._configure_timers()
+        self._update_result_actions()
 
     def _build_ui(self) -> None:
         self.appearance_toolbar = QToolBar("Aparência", self)
@@ -283,22 +400,30 @@ class MainWindow(QMainWindow):
         self.analyze_all_button.setEnabled(False)
         self.analyze_all_button.clicked.connect(lambda: self._start_full_analysis())
         controls_layout.addWidget(self.analyze_all_button)
-        self.export_button = QPushButton("Exportar CSV")
-        self.export_button.setEnabled(False)
-        self.export_button.clicked.connect(lambda: self._export_csv())
-        controls_layout.addWidget(self.export_button)
-        self.export_plot_button = QPushButton("Exportar gráfico (PNG)")
-        self.export_plot_button.setEnabled(False)
-        self.export_plot_button.clicked.connect(lambda: self._export_trajectory_plot())
-        controls_layout.addWidget(self.export_plot_button)
-        self.export_physical_button = QPushButton(
-            "Calcular grandezas e exportar CSV"
+        self.analysis_progress_bar = QProgressBar()
+        self.analysis_progress_bar.setRange(0, 1)
+        self.analysis_progress_bar.setValue(0)
+        self.analysis_progress_bar.setFormat("Aguardando análise")
+        self.analysis_progress_bar.setVisible(False)
+        controls_layout.addWidget(self.analysis_progress_bar)
+        self.tracking_data_button = QPushButton("Dados de Tracking")
+        self.tracking_data_button.setEnabled(False)
+        self.tracking_data_button.clicked.connect(
+            lambda: self._show_tracking_data()
         )
-        self.export_physical_button.setEnabled(False)
-        self.export_physical_button.clicked.connect(
-            lambda: self._export_physical_report()
+        controls_layout.addWidget(self.tracking_data_button)
+        self.visualize_plot_button = QPushButton("Visualizar gráfico")
+        self.visualize_plot_button.setEnabled(False)
+        self.visualize_plot_button.clicked.connect(
+            lambda: self._show_trajectory_plot()
         )
-        controls_layout.addWidget(self.export_physical_button)
+        controls_layout.addWidget(self.visualize_plot_button)
+        self.calculate_physical_button = QPushButton("Calcular Grandezas")
+        self.calculate_physical_button.setEnabled(False)
+        self.calculate_physical_button.clicked.connect(
+            lambda: self._calculate_physical_report()
+        )
+        controls_layout.addWidget(self.calculate_physical_button)
         controls_layout.addStretch(1)
 
         video_panel = QWidget()
@@ -353,6 +478,8 @@ class MainWindow(QMainWindow):
                 "border": "#5f6368",
                 "accent": "#8ab4f8",
                 "accent_text": "#202124",
+                "disabled_button": "#303134",
+                "disabled_text": "#80868b",
                 "tooltip": "#303134",
             }
         else:
@@ -365,6 +492,8 @@ class MainWindow(QMainWindow):
                 "border": "#c4c7c5",
                 "accent": "#1a73e8",
                 "accent_text": "#ffffff",
+                "disabled_button": "#dfe2e6",
+                "disabled_text": "#767b82",
                 "tooltip": "#fff8dc",
             }
 
@@ -391,7 +520,18 @@ class MainWindow(QMainWindow):
                 QPalette.ColorRole.HighlightedText,
                 QColor(colors["accent_text"]),
             )
+            palette.setColor(
+                QPalette.ColorGroup.Disabled,
+                QPalette.ColorRole.Button,
+                QColor(colors["disabled_button"]),
+            )
+            palette.setColor(
+                QPalette.ColorGroup.Disabled,
+                QPalette.ColorRole.ButtonText,
+                QColor(colors["disabled_text"]),
+            )
             application.setPalette(palette)
+            self.setPalette(palette)
 
         background = colors["window"]
         foreground = colors["text"]
@@ -481,12 +621,19 @@ class MainWindow(QMainWindow):
         self.play_button.setEnabled(True)
         self.analyze_interval_button.setEnabled(True)
         self.analyze_all_button.setEnabled(True)
-        self.export_button.setEnabled(False)
-        self.export_plot_button.setEnabled(False)
-        self.export_physical_button.setEnabled(False)
         self.results = None
         self.analysis_range = None
+        self._update_result_actions()
         self._request_frame(0, settings)
+
+    def _update_result_actions(self) -> None:
+        has_results = self.results is not None and not self.results.empty
+        analysis_ready = has_results and not self.analysis_in_progress
+        self.tracking_data_button.setEnabled(analysis_ready)
+        self.visualize_plot_button.setEnabled(analysis_ready)
+        self.calculate_physical_button.setEnabled(
+            analysis_ready and not self.report_in_progress
+        )
 
     def _read_settings(self) -> TrackingSettings:
         return self.applied_settings
@@ -752,9 +899,12 @@ class MainWindow(QMainWindow):
         self.analysis_in_progress = True
         self.analysis_range = (start_frame, end_frame)
         self.results = None
-        self.export_button.setEnabled(False)
-        self.export_plot_button.setEnabled(False)
-        self.export_physical_button.setEnabled(False)
+        self._update_result_actions()
+        total_frames = end_frame - start_frame + 1
+        self.analysis_progress_bar.setRange(0, total_frames)
+        self.analysis_progress_bar.setValue(0)
+        self.analysis_progress_bar.setFormat("Preparando análise…")
+        self.analysis_progress_bar.setVisible(True)
         self.analyze_interval_button.setEnabled(False)
         self.analyze_all_button.setEnabled(False)
         if start_frame == 0 and end_frame == self.video_frame_count - 1:
@@ -783,19 +933,53 @@ class MainWindow(QMainWindow):
                 settings,
                 start_frame=start_frame,
                 end_frame=end_frame,
+                progress_callback=self._queue_analysis_progress,
             )
         except Exception as error:
             self.analysis_queue.put((None, error))
             return
         self.analysis_queue.put((results, None))
 
+    def _queue_analysis_progress(self, processed_frames: int, total_frames: int) -> None:
+        try:
+            self.analysis_progress_queue.put_nowait((processed_frames, total_frames))
+        except queue.Full:
+            try:
+                self.analysis_progress_queue.get_nowait()
+            except queue.Empty:
+                pass
+            self.analysis_progress_queue.put_nowait((processed_frames, total_frames))
+
+    def _poll_analysis_progress(self) -> None:
+        latest_progress: tuple[int, int] | None = None
+        while True:
+            try:
+                latest_progress = self.analysis_progress_queue.get_nowait()
+            except queue.Empty:
+                break
+
+        if latest_progress is None or self.analysis_range is None:
+            return
+
+        processed_frames, total_frames = latest_progress
+        start_frame, _ = self.analysis_range
+        current_frame = start_frame + processed_frames
+        self.analysis_progress_bar.setRange(0, total_frames)
+        self.analysis_progress_bar.setValue(processed_frames)
+        self.analysis_progress_bar.setFormat(
+            f"Quadro {current_frame} de {self.video_frame_count} (%p%)"
+        )
+
     def _poll_analysis_result(self) -> None:
+        self._poll_analysis_progress()
         try:
             results, error = self.analysis_queue.get_nowait()
         except queue.Empty:
             return
 
+        self.analysis_progress_bar.setVisible(False)
         self.analysis_in_progress = False
+        self._update_result_actions()
         if self.video_path is not None:
             self.analyze_interval_button.setEnabled(True)
             self.analyze_all_button.setEnabled(True)
@@ -807,26 +991,30 @@ class MainWindow(QMainWindow):
 
     def _poll_report_result(self) -> None:
         try:
-            output_path, error = self.report_queue.get_nowait()
+            metrics, error = self.report_queue.get_nowait()
         except queue.Empty:
             return
 
         self.report_in_progress = False
-        self.export_physical_button.setEnabled(
-            self.results is not None and not self.results.empty
-        )
+        self._update_result_actions()
         if error is not None:
-            self.status.setText("Não foi possível gerar o relatório físico.")
-            QMessageBox.critical(self, "Erro ao gerar relatório", str(error))
-        elif output_path is not None:
-            self.status.setText(f"Relatório de grandezas exportado para {output_path}")
+            self.status.setText("Não foi possível calcular as grandezas físicas.")
+            QMessageBox.critical(self, "Erro ao calcular grandezas", str(error))
+        elif metrics is not None:
+            self.status.setText("Grandezas calculadas.")
+            self._show_physical_report(*metrics)
+        else:
+            self.status.setText("Não foi possível calcular as grandezas físicas.")
+            QMessageBox.critical(
+                self,
+                "Erro ao calcular grandezas",
+                "O cálculo não retornou resultados.",
+            )
 
     def _analysis_finished(self, results: pd.DataFrame) -> None:
         self.results = results
+        self._update_result_actions()
         if results.empty:
-            self.export_button.setEnabled(False)
-            self.export_plot_button.setEnabled(False)
-            self.export_physical_button.setEnabled(False)
             self.status.setText("Análise concluída: nenhuma partícula foi detectada.")
             return
 
@@ -839,16 +1027,26 @@ class MainWindow(QMainWindow):
             f"Análise concluída{range_text}: {len(results)} localizações em "
             f"{particle_count} trajetórias."
         )
-        self.export_button.setEnabled(True)
-        self.export_plot_button.setEnabled(True)
-        self.export_physical_button.setEnabled(True)
 
-    def _export_csv(self) -> None:
-        if self.results is None:
+    def _show_tracking_data(self) -> None:
+        if self.results is None or self.results.empty:
             return
+
+        tracking_data = self.results.copy()
+        dialog = TrackingDataDialog(tracking_data, self)
+        dialog.save_button.clicked.connect(
+            lambda: self._save_tracking_data(tracking_data, dialog)
+        )
+        dialog.exec()
+
+    def _save_tracking_data(
+        self,
+        tracking_data: pd.DataFrame,
+        dialog: TrackingDataDialog,
+    ) -> None:
         destination = QFileDialog.getSaveFileName(
-            self,
-            "Exportar resultados",
+            dialog,
+            "Salvar dados de tracking",
             "",
             "Arquivo CSV (*.csv)",
         )[0]
@@ -857,33 +1055,45 @@ class MainWindow(QMainWindow):
         if not destination.lower().endswith(".csv"):
             destination += ".csv"
         try:
-            self.results.to_csv(destination, index=False)
+            tracking_data.to_csv(destination, index=False)
         except OSError as error:
-            QMessageBox.critical(self, "Erro ao exportar CSV", str(error))
+            QMessageBox.critical(dialog, "Erro ao salvar dados de tracking", str(error))
             return
-        self.status.setText(f"Resultados exportados para {destination}")
+        self.status.setText(f"Dados de tracking salvos em {destination}")
 
-    def _export_trajectory_plot(self) -> None:
+    def _show_trajectory_plot(self) -> None:
         if self.results is None or self.results.empty:
             return
-        destination = QFileDialog.getSaveFileName(
-            self,
-            "Exportar gráfico das trajetórias",
-            "",
-            "Imagem PNG (*.png)",
-        )[0]
-        if not destination:
-            return
-        if not destination.lower().endswith(".png"):
-            destination += ".png"
-        try:
-            export_trajectory_plot(self.results, Path(destination))
-        except (OSError, ValueError, RuntimeError) as error:
-            QMessageBox.critical(self, "Erro ao exportar gráfico", str(error))
-            return
-        self.status.setText(f"Gráfico exportado para {destination}")
 
-    def _export_physical_report(self) -> None:
+        try:
+            figure = create_trajectory_figure(self.results)
+        except (ValueError, RuntimeError) as error:
+            QMessageBox.critical(self, "Erro ao gerar gráfico", str(error))
+            return
+
+        foreground = "#e8eaed" if self.dark_mode else "#202124"
+        background = self._plot_background_color
+        figure.set_facecolor(background)
+        axes = figure.axes[0]
+        axes.set_facecolor(background)
+        axes.title.set_color(foreground)
+        axes.xaxis.label.set_color(foreground)
+        axes.yaxis.label.set_color(foreground)
+        axes.tick_params(colors=foreground)
+        for spine in axes.spines.values():
+            spine.set_color(foreground)
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Trajetórias das partículas")
+        dialog.resize(900, 650)
+        layout = QVBoxLayout(dialog)
+        canvas = FigureCanvasQTAgg(figure)
+        toolbar = NavigationToolbar2QT(canvas, dialog)
+        layout.addWidget(toolbar)
+        layout.addWidget(canvas)
+        dialog.exec()
+
+    def _calculate_physical_report(self) -> None:
         if self.results is None or self.results.empty or self.report_in_progress:
             return
         try:
@@ -900,25 +1110,13 @@ class MainWindow(QMainWindow):
             )
             return
 
-        destination = QFileDialog.getSaveFileName(
-            self,
-            "Exportar grandezas físicas",
-            "",
-            "Arquivo CSV (*.csv)",
-        )[0]
-        if not destination:
-            return
-        if not destination.lower().endswith(".csv"):
-            destination += ".csv"
-
         self.report_in_progress = True
-        self.export_physical_button.setEnabled(False)
+        self.calculate_physical_button.setEnabled(False)
         self.status.setText("Calculando MSD e grandezas físicas…")
         threading.Thread(
             target=self._generate_physical_report,
             args=(
                 self.results.copy(),
-                Path(destination),
                 radius_nm,
                 temperature_c,
                 micrometers_per_pixel,
@@ -929,15 +1127,13 @@ class MainWindow(QMainWindow):
     def _generate_physical_report(
         self,
         trajectories: pd.DataFrame,
-        output_path: Path,
         radius_nm: float,
         temperature_c: float,
         micrometers_per_pixel: float | None,
     ) -> None:
         try:
-            export_physical_report(
+            metrics = calculate_physical_metrics(
                 trajectories,
-                output_path,
                 radius_nm,
                 temperature_c,
                 micrometers_per_pixel,
@@ -945,7 +1141,46 @@ class MainWindow(QMainWindow):
         except Exception as error:
             self.report_queue.put((None, error))
             return
-        self.report_queue.put((str(output_path), None))
+        self.report_queue.put((metrics, None))
+
+    def _show_physical_report(
+        self,
+        summary: pd.DataFrame,
+        msd_curve: pd.DataFrame,
+    ) -> None:
+        dialog = PhysicalReportDialog(summary, msd_curve, self)
+        dialog.save_button.clicked.connect(
+            lambda: self._save_physical_report(summary, msd_curve, dialog)
+        )
+        dialog.exec()
+
+    def _save_physical_report(
+        self,
+        summary: pd.DataFrame,
+        msd_curve: pd.DataFrame,
+        dialog: PhysicalReportDialog,
+    ) -> None:
+        destination = QFileDialog.getSaveFileName(
+            dialog,
+            "Salvar relatório de grandezas",
+            "",
+            "Planilha Excel (*.xlsx)",
+        )[0]
+        if not destination:
+            return
+        if not destination.lower().endswith(".xlsx"):
+            destination += ".xlsx"
+
+        try:
+            write_physical_report_xlsx(
+                summary,
+                msd_curve,
+                Path(destination),
+            )
+        except OSError as error:
+            QMessageBox.critical(dialog, "Erro ao salvar relatório", str(error))
+            return
+        self.status.setText(f"Planilha de grandezas salva em {destination}")
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self.playback_timer.stop()

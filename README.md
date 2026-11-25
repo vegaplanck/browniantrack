@@ -83,16 +83,24 @@ reiniciar o aplicativo.
    usando a taxa de quadros do vídeo.
    Use **Analisar intervalo** para rastrear apenas esse trecho ou **Analisar
    vídeo todo** para rastrear todos os quadros, sem depender do intervalo.
-6. Ao terminar a análise, escolha **Exportar CSV** para salvar as localizações
-   e trajetórias ou **Exportar gráfico (PNG)** para salvar a visualização de
-   todas as trajetórias, gerada por `trackpy.plot_traj`. O CSV conserva os
-   números de quadro originais do vídeo, começando em 0.
+   Durante o processamento, a barra de progresso mostra o quadro atual e o
+   percentual concluído.
+6. Após uma análise que detecte partículas, use **Dados de Tracking** para
+   visualizar as localizações e trajetórias em uma tabela; **Salvar CSV…**
+   grava os dados exibidos. **Visualizar gráfico** abre as trajetórias geradas
+   por `trackpy.plot_traj`; use o botão de salvar da barra de ferramentas do
+   Matplotlib para guardar o gráfico como imagem. O CSV conserva os números de
+   quadro originais do vídeo, começando em 0.
 7. Preencha o raio hidrodinâmico (nm) e a temperatura do experimento (°C), e
-   use **Calcular grandezas e exportar CSV** para gerar um relatório com as
-   entradas, a curva MSD e os parâmetros calculados. A escala espacial em
+   use **Calcular Grandezas** para exibir um resumo e a curva MSD em tabelas.
+   O botão **Salvar planilha…** na janela das tabelas salva um arquivo Excel
+   (.xlsx) com as abas **Resumo** e **Curva MSD**. A escala espacial em
    µm/pixel é opcional: sem ela, MSD e difusão são reportados em unidades de
    pixel e a viscosidade física não é inferida. O relatório identifica
    explicitamente \(k_B\) e \(N_A\) como constantes tabeladas.
+
+   **Dados de Tracking**, **Visualizar gráfico** e **Calcular Grandezas** só
+   ficam habilitados após a análise de um intervalo com partículas detectadas.
 
 Os parâmetros de detecção dependem da escala e do contraste do vídeo. O
 diâmetro deve ser um inteiro ímpar, em pixels.

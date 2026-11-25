@@ -12,6 +12,7 @@ dependencies = [
     "matplotlib>=3.7",
     "numpy>=1.23",
     "pandas>=1.5",
+    "openpyxl>=3.1",
     "pims>=0.6",
     "trackpy>=0.6",
     "av>=12",
