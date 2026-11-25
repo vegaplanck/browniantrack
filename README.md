@@ -6,12 +6,7 @@ analisar movimento browniano usando [trackpy](https://github.com/soft-matter/tra
 ## Requisitos
 
 - Conda
-- O ambiente `fisexpvi`, com `trackpy` e `pims`
-- Tkinter (incluído no ambiente Python; em algumas distribuições Linux pode
-  precisar ser instalado separadamente)
-- No Linux, a escala da interface acompanha o DPI Xft quando o recurso
-  `Xft.dpi` puder ser lido por `xrdb`; nos demais casos, o Tk mantém sua escala
-  nativa.
+- O ambiente `fisexpvi`, com PySide6 (Qt 6), `trackpy` e `pims`
 
 ## Instalação e execução
 
@@ -65,6 +60,9 @@ GitHub uma tag cujo nome comece por `v`, por exemplo `v0.1.0`.
 
 ## Uso
 
+Use **Modo escuro** na barra superior para alternar a aparência da interface sem
+reiniciar o aplicativo.
+
 1. Abra um vídeo pelo menu **Arquivo → Abrir…** ou use `Ctrl+O` (`Cmd+O` no
    macOS). O PIMS abre o arquivo para validar a leitura e exibe as dimensões e
    a quantidade de quadros.
@@ -116,7 +114,7 @@ src/browniantrack/
 │   ├── tracking.py       # Análise completa e pipeline trackpy
 │   └── video_preview.py  # Pré-visualização e detecção por quadro
 └── ui/
-    └── main_window.py    # Interface desktop Tkinter
+    └── main_window.py    # Interface desktop PySide6/Qt 6
 tests/
 └── test_tracking.py      # Testes dos parâmetros de análise
 ```
