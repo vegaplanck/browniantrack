@@ -16,6 +16,7 @@ from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
+    QLabel,
     QProgressBar,
     QTabWidget,
     QTableView,
@@ -40,8 +41,17 @@ class QtMainWindowTests(unittest.TestCase):
             self.assertEqual(window.windowTitle(), "BrownianTrack")
             self.assertIsNone(window.menuWidget())
             self.assertIsInstance(window.canvas, FigureCanvasQTAgg)
+            self.assertFalse(
+                any(
+                    label.text() == "BrownianTrack"
+                    for label in window.findChildren(QLabel)
+                )
+            )
             self.assertFalse(window.analyze_interval_button.isEnabled())
             self.assertFalse(window.analyze_all_button.isEnabled())
+            self.assertEqual(window.show_circles_check.text(), "Destacar Partículas")
+            self.assertFalse(window.show_circles_check.isChecked())
+            self.assertTrue(window.show_circles_check.isEnabled())
             self.assertEqual(window.tracking_data_button.text(), "Dados de Tracking")
             self.assertFalse(window.tracking_data_button.isEnabled())
             self.assertFalse(window.visualize_plot_button.isEnabled())

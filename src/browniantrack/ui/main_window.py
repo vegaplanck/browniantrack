@@ -294,10 +294,6 @@ class MainWindow(QMainWindow):
         controls_layout.setSpacing(8)
         controls_scroll.setWidget(controls)
 
-        title = QLabel("BrownianTrack")
-        title.setStyleSheet("font-size: 18pt; font-weight: bold;")
-        controls_layout.addWidget(title)
-
         open_button = QPushButton("Abrir vídeo…")
         open_button.clicked.connect(lambda: self._open_video())
         controls_layout.addWidget(open_button)
@@ -345,8 +341,8 @@ class MainWindow(QMainWindow):
         physical_layout.addWidget(physical_note, 3, 0, 1, 2)
         controls_layout.addWidget(physical)
 
-        self.show_circles_check = QCheckBox("Círculos vermelhos (tp.annotate)")
-        self.show_circles_check.setChecked(True)
+        self.show_circles_check = QCheckBox("Destacar Partículas")
+        self.show_circles_check.setChecked(False)
         self.show_circles_check.toggled.connect(
             lambda: self._on_display_settings_changed()
         )

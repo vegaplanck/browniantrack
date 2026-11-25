@@ -73,7 +73,7 @@ reiniciar o aplicativo.
    A edição dos campos não aciona a detecção; os valores só são validados e
    usados após clicar em **Aplicar**. Durante a reprodução, o ajuste aplicado
    vale para os quadros seguintes.
-4. Ative **Círculos vermelhos** para desenhar as detecções com `trackpy.annotate`.
+4. Ative **Destacar Partículas** para desenhar as detecções com `trackpy.annotate`.
    Ative **Exibir em escala de cinza** para visualizar a conversão do PIMS.
    A detecção do trackpy sempre usa tons de cinza, pois o localizador trabalha
    com imagens 2D; a opção de exibição não altera esse processamento.
